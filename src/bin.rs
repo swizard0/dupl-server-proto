@@ -47,18 +47,17 @@ macro_rules! put_adv {
 }
 
 trait U8Support {
+    fn read_i8(buf: &[u8]) -> i8;
+    fn write_i8(buf: &mut [u8], n: i8);
     fn read_u8(buf: &[u8]) -> u8;
     fn write_u8(buf: &mut [u8], n: u8);
 }
 
 impl U8Support for NativeEndian {
-    fn read_u8(buf: &[u8]) -> u8 {
-        buf[0]
-    }
-
-    fn write_u8(buf: &mut [u8], n: u8) {
-        buf[0] = n;
-    }
+    fn read_i8(buf: &[u8]) -> i8 { buf[0] as i8 }
+    fn write_i8(buf: &mut [u8], n: i8) { buf[0] = n as u8; }
+    fn read_u8(buf: &[u8]) -> u8 { buf[0] }
+    fn write_u8(buf: &mut [u8], n: u8) { buf[0] = n; }
 }
 
 macro_rules! try_get_str {
@@ -83,6 +82,39 @@ macro_rules! put_str_adv {
         bytes::copy_memory(src, area);
         &mut area[src.len() ..]
     })
+}
+
+macro_rules! impl_bin {
+    ($(($ty:ty, $reader:ident, $writer:ident)),*) => ($(
+        impl ToBin for $ty {
+            fn encode_len(&self) -> usize {
+                size_of::<$ty>()
+            }
+
+            fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+                put_adv!(area, $ty, $writer, *self)
+            }
+        }
+
+        impl FromBin for $ty {
+            fn decode<'a>(area: &'a [u8]) -> Result<($ty, &'a [u8]), Error> {
+                Ok(try_get!(area, $ty, $reader))
+            }
+        }
+    )*)
+}
+
+impl_bin! {
+    (i8, read_i8, write_i8),
+    (u8, read_u8, write_u8),
+    (i16, read_i16, write_i16),
+    (u16, read_u16, write_u16),
+    (i32, read_i32, write_i32),
+    (u32, read_u32, write_u32),
+    (i64, read_i64, write_i64),
+    (u64, read_u64, write_u64),
+    (f32, read_f32, write_f32),
+    (f64, read_f64, write_f64)
 }
 
 impl ToBin for String {
@@ -657,6 +689,22 @@ mod test {
                 similarity: 0.5,
                 user_data: ref match_user_data,
             }))) if match_user_data == "some data" => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_f64() {
+        match encode_decode::<Rep<f64>>(Rep::Result(Workload::Single(LookupResult::Best(Match {
+            cluster_id: 177,
+            similarity: 0.5,
+            user_data: 0.1,
+        })))) {
+            Rep::Result(Workload::Single(LookupResult::Best(Match {
+                cluster_id: 177,
+                similarity: 0.5,
+                user_data: 0.1,
+            }))) => (),
             other => panic!("bad result: {:?}", other),
         }
     }
