@@ -6,6 +6,8 @@ use std::io::{Read, Write, Seek};
 use std::fmt::Debug;
 use std::convert::From;
 
+pub mod json;
+
 #[derive(Clone, Debug)]
 pub enum Req<UD> where UD: Clone + Debug {
     Init,
