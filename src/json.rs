@@ -6,10 +6,10 @@ use super::{
     Rep, LookupResult, Match
 };
 
-pub fn req_to_json<UD>(req: &Req<UD>) -> Json where UD: Clone + Debug + ToJson { req.to_json() }
-pub fn rep_to_json<UD>(rep: &Rep<UD>) -> Json where UD: Clone + Debug + ToJson { rep.to_json() }
+pub fn req_to_json<UD>(req: &Req<UD>) -> Json where UD: Debug + ToJson { req.to_json() }
+pub fn rep_to_json<UD>(rep: &Rep<UD>) -> Json where UD: Debug + ToJson { rep.to_json() }
 
-pub fn json_str_to_anything<T>(json_str: &str) -> Result<T, String> where T: Clone + Debug + FromJson {
+pub fn json_str_to_anything<T>(json_str: &str) -> Result<T, String> where T: Debug + FromJson {
     match Json::from_str(json_str) {
         Ok(ref json) => match <T as FromJson>::from_json(json) {
             Ok(value) =>
@@ -24,11 +24,11 @@ pub fn json_str_to_anything<T>(json_str: &str) -> Result<T, String> where T: Clo
     }
 }
 
-pub fn json_to_req<'a, UD>(json: &'a Json) -> Result<Req<UD>, JsonDecodeError<'a>> where UD: Clone + Debug + FromJson {
+pub fn json_to_req<'a, UD>(json: &'a Json) -> Result<Req<UD>, JsonDecodeError<'a>> where UD: Debug + FromJson {
     <Req<UD> as FromJson>::from_json(json)
 }
 
-pub fn json_to_rep<'a, UD>(json: &'a Json) -> Result<Rep<UD>, JsonDecodeError<'a>> where UD: Clone + Debug + FromJson {
+pub fn json_to_rep<'a, UD>(json: &'a Json) -> Result<Rep<UD>, JsonDecodeError<'a>> where UD: Debug + FromJson {
     <Rep<UD> as FromJson>::from_json(json)
 }
 
@@ -70,7 +70,7 @@ impl ToJson for InsertCond {
     }
 }
 
-impl<UD> ToJson for PostAction<UD> where UD: Clone + Debug + ToJson {
+impl<UD> ToJson for PostAction<UD> where UD: Debug + ToJson {
     fn to_json(&self) -> Json {
         match self {
             &PostAction::None =>
@@ -86,7 +86,7 @@ impl<UD> ToJson for PostAction<UD> where UD: Clone + Debug + ToJson {
     }
 }
 
-impl<UD> ToJson for LookupTask<UD> where UD: Clone + Debug + ToJson {
+impl<UD> ToJson for LookupTask<UD> where UD: Debug + ToJson {
     fn to_json(&self) -> Json {
         let mut o = Object::new();
         o.insert("text".to_string(), self.text.to_json());
@@ -96,7 +96,7 @@ impl<UD> ToJson for LookupTask<UD> where UD: Clone + Debug + ToJson {
     }
 }
 
-impl<T> ToJson for Workload<T> where T: Clone + Debug + ToJson {
+impl<T> ToJson for Workload<T> where T: Debug + ToJson {
     fn to_json(&self) -> Json {
         match self {
             &Workload::Single(ref value) => value.to_json(),
@@ -105,7 +105,7 @@ impl<T> ToJson for Workload<T> where T: Clone + Debug + ToJson {
     }
 }
 
-impl<UD> ToJson for Req<UD> where UD: Clone + Debug + ToJson {
+impl<UD> ToJson for Req<UD> where UD: Debug + ToJson {
     fn to_json(&self) -> Json {
         match self {
             &Req::Init =>
@@ -121,7 +121,7 @@ impl<UD> ToJson for Req<UD> where UD: Clone + Debug + ToJson {
     }
 }
 
-impl<UD> ToJson for Match<UD> where UD: Clone + Debug + ToJson {
+impl<UD> ToJson for Match<UD> where UD: Debug + ToJson {
     fn to_json(&self) -> Json {
         let mut o = Object::new();
         o.insert("cluster_id".to_string(), self.cluster_id.to_json());
@@ -131,7 +131,7 @@ impl<UD> ToJson for Match<UD> where UD: Clone + Debug + ToJson {
     }
 }
 
-impl<UD> ToJson for LookupResult<UD> where UD: Clone + Debug + ToJson {
+impl<UD> ToJson for LookupResult<UD> where UD: Debug + ToJson {
     fn to_json(&self) -> Json {
         match self {
             &LookupResult::EmptySet => Json::Null,
@@ -154,7 +154,7 @@ impl<UD> ToJson for LookupResult<UD> where UD: Clone + Debug + ToJson {
     }
 }
 
-impl<UD> ToJson for Rep<UD> where UD: Clone + Debug + ToJson {
+impl<UD> ToJson for Rep<UD> where UD: Debug + ToJson {
     fn to_json(&self) -> Json {
         match self {
             &Rep::InitAck => Json::String("init_ack".to_string()),
@@ -235,7 +235,7 @@ impl FromJson for InsertCond {
     }
 }
 
-impl<UD> FromJson for PostAction<UD> where UD: Clone + Debug + FromJson {
+impl<UD> FromJson for PostAction<UD> where UD: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<PostAction<UD>, JsonDecodeError<'a>> {
         match json {
             &Json::String(ref token) if *token == "none" =>
@@ -254,7 +254,7 @@ impl<UD> FromJson for PostAction<UD> where UD: Clone + Debug + FromJson {
     }
 }
 
-impl<UD> FromJson for LookupTask<UD> where UD: Clone + Debug + FromJson {
+impl<UD> FromJson for LookupTask<UD> where UD: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<LookupTask<UD>, JsonDecodeError<'a>> {
         match json {
             &Json::Object(ref obj) => match (obj.get("text"), obj.get("result"), obj.get("post_action")) {
@@ -271,7 +271,7 @@ impl<UD> FromJson for LookupTask<UD> where UD: Clone + Debug + FromJson {
     }
 }
 
-impl<T> FromJson for Workload<T> where T: Clone + Debug + FromJson {
+impl<T> FromJson for Workload<T> where T: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<Workload<T>, JsonDecodeError<'a>> {
         match json {
             &Json::Array(ref obj) =>
@@ -282,7 +282,7 @@ impl<T> FromJson for Workload<T> where T: Clone + Debug + FromJson {
     }
 }
 
-impl<UD> FromJson for Req<UD> where UD: Clone + Debug + FromJson {
+impl<UD> FromJson for Req<UD> where UD: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<Req<UD>, JsonDecodeError<'a>> {
         match json {
             &Json::String(ref token) if *token == "init" =>
@@ -301,7 +301,7 @@ impl<UD> FromJson for Req<UD> where UD: Clone + Debug + FromJson {
     }
 }
 
-impl<UD> FromJson for Match<UD> where UD: Clone + Debug + FromJson {
+impl<UD> FromJson for Match<UD> where UD: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<Match<UD>, JsonDecodeError<'a>> {
         match json {
             &Json::Object(ref obj) => match (obj.get("cluster_id"), obj.get("similarity"), obj.get("user_data")) {
@@ -320,7 +320,7 @@ impl<UD> FromJson for Match<UD> where UD: Clone + Debug + FromJson {
     }
 }
 
-impl<UD> FromJson for LookupResult<UD> where UD: Clone + Debug + FromJson {
+impl<UD> FromJson for LookupResult<UD> where UD: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<LookupResult<UD>, JsonDecodeError<'a>> {
         match json {
             &Json::Null => Ok(LookupResult::EmptySet),
@@ -340,7 +340,7 @@ impl<UD> FromJson for LookupResult<UD> where UD: Clone + Debug + FromJson {
     }
 }
 
-impl<UD> FromJson for Rep<UD> where UD: Clone + Debug + FromJson {
+impl<UD> FromJson for Rep<UD> where UD: Debug + FromJson {
     fn from_json<'a>(json: &'a Json) -> Result<Rep<UD>, JsonDecodeError<'a>> {
         match json {
             &Json::String(ref token) if *token == "init_ack" =>

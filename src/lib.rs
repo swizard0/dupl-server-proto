@@ -7,49 +7,49 @@ use std::fmt::Debug;
 pub mod bin;
 pub mod json;
 
-#[derive(Clone, Debug)]
-pub enum Req<UD> where UD: Clone + Debug {
+#[derive(Debug)]
+pub enum Req<UD> where UD: Debug {
     Init,
     Lookup(Workload<LookupTask<UD>>),
     Terminate,
 }
 
-#[derive(Clone, Debug)]
-pub enum Workload<T> where T: Clone + Debug {
+#[derive(Debug)]
+pub enum Workload<T> where T: Debug {
     Single(T),
     Many(Vec<T>),
 }
 
-#[derive(Clone, Debug)]
-pub struct LookupTask<UD> where UD: Clone + Debug {
+#[derive(Debug)]
+pub struct LookupTask<UD> where UD: Debug {
     pub text: String,
     pub result: LookupType,
     pub post_action: PostAction<UD>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug)]
 pub enum LookupType { All, Best, BestOrMine }
 
-#[derive(Clone, Debug)]
-pub enum PostAction<UD> where UD: Clone + Debug {
+#[derive(Debug)]
+pub enum PostAction<UD> where UD: Debug {
     None,
     InsertNew { cond: InsertCond, assign: ClusterAssign, user_data: UD, },
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug)]
 pub enum InsertCond {
     Always,
     BestSimLessThan(f64),
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug)]
 pub enum ClusterAssign {
     ServerChoice,
     ClientChoice(u64),
 }
 
-#[derive(Clone, Debug)]
-pub enum Rep<UD> where UD: Clone + Debug {
+#[derive(Debug)]
+pub enum Rep<UD> where UD: Debug {
     InitAck,
     Result(Workload<LookupResult<UD>>),
     TerminateAck,
@@ -58,16 +58,16 @@ pub enum Rep<UD> where UD: Clone + Debug {
     WantCrash,
 }
 
-#[derive(Clone, Debug)]
-pub enum LookupResult<UD> where UD: Clone + Debug {
+#[derive(Debug)]
+pub enum LookupResult<UD> where UD: Debug {
     EmptySet,
     Best(Match<UD>),
     Neighbours(Workload<Match<UD>>),
     Error(String),
 }
 
-#[derive(Clone, Debug)]
-pub struct Match<UD> where UD: Clone + Debug {
+#[derive(Debug)]
+pub struct Match<UD> where UD: Debug {
     pub cluster_id: u64,
     pub similarity: f64,
     pub user_data: UD,

@@ -1,9 +1,15 @@
 use std::{io, fmt, str};
+use std::fmt::Debug;
 use std::mem::size_of;
 use std::slice::bytes;
 use std::convert::From;
 use byteorder;
 use byteorder::{ByteOrder, NativeEndian};
+use super::{
+    Workload,
+    Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+    Rep, LookupResult, Match
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -11,7 +17,7 @@ pub enum Error {
     ByteOrder(byteorder::Error),
     Utf8(str::Utf8Error),
     UnexpectedEOF,
-    UnexpectedOctet { octet: u8, position: u64, },
+    InvalidTag(u8),
 }
 
 pub trait ToBin {
@@ -95,6 +101,387 @@ impl FromBin for String {
     }
 }
 
+impl<UD> ToBin for Req<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &Req::Init | &Req::Terminate => 0,
+            &Req::Lookup(ref workload) => workload.encode_len(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &Req::Init =>
+                put_adv!(area, u8, write_u8, 1),
+            &Req::Lookup(ref workload) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                workload.encode(area)
+            },
+            &Req::Terminate =>
+                put_adv!(area, u8, write_u8, 3),
+        }
+    }
+}
+
+impl<UD> FromBin for Req<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(Req<UD>, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((Req::Init, area)),
+            (2, area) => {
+                let (workload, area) = try!(Workload::decode(area));
+                Ok((Req::Lookup(workload), area))
+            },
+            (3, area) =>
+                Ok((Req::Terminate, area)),
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl<T> ToBin for Workload<T> where T: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &Workload::Single(ref value) => value.encode_len(),
+            &Workload::Many(ref values) => size_of::<u32>() + values.iter().fold(0, |total, value| total + value.encode_len()),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &Workload::Single(ref value) => {
+                let area = put_adv!(area, u8, write_u8, 1);
+                value.encode(area)
+            },
+            &Workload::Many(ref values) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                values.iter().fold(area, |area, value| value.encode(area))
+            },
+        }
+    }
+}
+
+impl<T> FromBin for Workload<T> where T: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(Workload<T>, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) => {
+                let (value, area) = try!(T::decode(area));
+                Ok((Workload::Single(value), area))
+            },
+            (2, area) => {
+                let (len, mut area) = try_get!(area, u32, read_u32);
+                let mut values = Vec::with_capacity(len as usize);
+                for _ in 0 .. len {
+                    let (value, next_area) = try!(T::decode(area));
+                    values.push(value);
+                    area = next_area;
+                }
+                Ok((Workload::Many(values), area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl<UD> ToBin for LookupTask<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        self.text.encode_len() + self.result.encode_len() + self.post_action.encode_len()
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        let area = self.text.encode(area);
+        let area = self.result.encode(area);
+        let area = self.post_action.encode(area);
+        area
+    }
+}
+
+impl<UD> FromBin for LookupTask<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(LookupTask<UD>, &'a [u8]), Error> {
+        let (text, area) = try!(String::decode(area));
+        let (result, area) = try!(LookupType::decode(area));
+        let (post_action, area) = try!(PostAction::decode(area));
+        Ok((LookupTask {
+            text: text,
+            result: result,
+            post_action: post_action,
+        }, area))
+    }
+}
+
+impl ToBin for LookupType {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>()
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &LookupType::All => put_adv!(area, u8, write_u8, 1),
+            &LookupType::Best => put_adv!(area, u8, write_u8, 2),
+            &LookupType::BestOrMine => put_adv!(area, u8, write_u8, 3),
+        }
+    }
+}
+
+impl FromBin for LookupType {
+    fn decode<'a>(area: &'a [u8]) -> Result<(LookupType, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) => Ok((LookupType::All, area)),
+            (2, area) => Ok((LookupType::Best, area)),
+            (3, area) => Ok((LookupType::BestOrMine, area)),
+            (tag, _) => Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl<UD> ToBin for PostAction<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &PostAction::None =>
+                0,
+            &PostAction::InsertNew { cond: ref c, assign: ref a, user_data: ref u, } =>
+                c.encode_len() + a.encode_len() + u.encode_len(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &PostAction::None =>
+                put_adv!(area, u8, write_u8, 1),
+            &PostAction::InsertNew { cond: ref c, assign: ref a, user_data: ref u, } => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                let area = c.encode(area);
+                let area = a.encode(area);
+                let area = u.encode(area);
+                area
+            },
+        }
+    }
+}
+
+impl<UD> FromBin for PostAction<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(PostAction<UD>, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((PostAction::None, area)),
+            (2, area) => {
+                let (cond, area) = try!(InsertCond::decode(area));
+                let (assign, area) = try!(ClusterAssign::decode(area));
+                let (user_data, area) = try!(UD::decode(area));
+                Ok((PostAction::InsertNew { cond: cond, assign: assign, user_data: user_data, }, area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl ToBin for InsertCond {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &InsertCond::Always => 0,
+            &InsertCond::BestSimLessThan(..) => size_of::<f64>(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &InsertCond::Always =>
+                put_adv!(area, u8, write_u8, 1),
+            &InsertCond::BestSimLessThan(sim) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                put_adv!(area, f64, write_f64, sim)
+            },
+        }
+    }
+}
+
+impl FromBin for InsertCond {
+    fn decode<'a>(area: &'a [u8]) -> Result<(InsertCond, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((InsertCond::Always, area)),
+            (2, area) => {
+                let (sim, area) = try_get!(area, f64, read_f64);
+                Ok((InsertCond::BestSimLessThan(sim), area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl ToBin for ClusterAssign {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &ClusterAssign::ServerChoice => 0,
+            &ClusterAssign::ClientChoice(..) => size_of::<u64>(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &ClusterAssign::ServerChoice =>
+                put_adv!(area, u8, write_u8, 1),
+            &ClusterAssign::ClientChoice(cluster_id) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                put_adv!(area, u64, write_u64, cluster_id)
+            },
+        }
+    }
+}
+
+impl FromBin for ClusterAssign {
+    fn decode<'a>(area: &'a [u8]) -> Result<(ClusterAssign, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((ClusterAssign::ServerChoice, area)),
+            (2, area) => {
+                let (cluster_id, area) = try_get!(area, u64, read_u64);
+                Ok((ClusterAssign::ClientChoice(cluster_id), area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl<UD> ToBin for Rep<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &Rep::InitAck | &Rep::TerminateAck | &Rep::TooBusy | &Rep::WantCrash => 0,
+            &Rep::Result(ref workload) => workload.encode_len(),
+            &Rep::Unexpected(ref req) => req.encode_len(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &Rep::InitAck =>
+                put_adv!(area, u8, write_u8, 1),
+            &Rep::Result(ref workload) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                workload.encode(area)
+            },
+            &Rep::TerminateAck =>
+                put_adv!(area, u8, write_u8, 3),
+            &Rep::Unexpected(ref req) => {
+                let area = put_adv!(area, u8, write_u8, 4);
+                req.encode(area)
+            },
+            &Rep::TooBusy =>
+                put_adv!(area, u8, write_u8, 5),
+            &Rep::WantCrash =>
+                put_adv!(area, u8, write_u8, 6),
+        }
+    }
+}
+
+impl<UD> FromBin for Rep<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(Rep<UD>, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((Rep::InitAck, area)),
+            (2, area) => {
+                let (workload, area) = try!(Workload::decode(area));
+                Ok((Rep::Result(workload), area))
+            },
+            (3, area) =>
+                Ok((Rep::TerminateAck, area)),
+            (4, area) => {
+                let (req, area) = try!(Req::decode(area));
+                Ok((Rep::Unexpected(req), area))
+            },
+            (5, area) =>
+                Ok((Rep::TooBusy, area)),
+            (6, area) =>
+                Ok((Rep::WantCrash, area)),
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl<UD> ToBin for LookupResult<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &LookupResult::EmptySet => 0,
+            &LookupResult::Best(ref m) => m.encode_len(),
+            &LookupResult::Neighbours(ref workload) => workload.encode_len(),
+            &LookupResult::Error(ref e) => e.encode_len(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &LookupResult::EmptySet =>
+                put_adv!(area, u8, write_u8, 1),
+            &LookupResult::Best(ref m) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                m.encode(area)
+            },
+            &LookupResult::Neighbours(ref workload) => {
+                let area = put_adv!(area, u8, write_u8, 3);
+                workload.encode(area)
+            },
+            &LookupResult::Error(ref e) => {
+                let area = put_adv!(area, u8, write_u8, 4);
+                e.encode(area)
+            },
+        }
+    }
+}
+
+impl<UD> FromBin for LookupResult<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(LookupResult<UD>, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((LookupResult::EmptySet, area)),
+            (2, area) => {
+                let (m, area) = try!(Match::decode(area));
+                Ok((LookupResult::Best(m), area))
+            },
+            (3, area) => {
+                let (workload, area) = try!(Workload::decode(area));
+                Ok((LookupResult::Neighbours(workload), area))
+            },
+            (4, area) => {
+                let (e, area) = try!(String::decode(area));
+                Ok((LookupResult::Error(e), area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl<UD> ToBin for Match<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u64>() + size_of::<f64>() + self.user_data.encode_len()
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        let area = put_adv!(area, u64, write_u64, self.cluster_id);
+        let area = put_adv!(area, f64, write_f64, self.similarity);
+        let area = self.user_data.encode(area);
+        area
+    }
+}
+
+impl<UD> FromBin for Match<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(Match<UD>, &'a [u8]), Error> {
+        let (cluster_id, area) = try_get!(area, u64, read_u64);
+        let (similarity, area) = try_get!(area, f64, read_f64);
+        let (user_data, area) = try!(UD::decode(area));
+        Ok((Match {
+            cluster_id: cluster_id,
+            similarity: similarity,
+            user_data: user_data,
+        }, area))
+    }
+}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -103,7 +490,7 @@ impl fmt::Display for Error {
             &Error::ByteOrder(ref err) => write!(f, "byteorder related error: {}", err),
             &Error::Utf8(ref err) => write!(f, "utf8 related error: {}", err),
             &Error::UnexpectedEOF => f.write_str("unexpected EOF"),
-            &Error::UnexpectedOctet { octet: o, position: p } => write!(f, "unexpected char {} at position {}", o, p),
+            &Error::InvalidTag(tag) => write!(f, "invalid proto tag {}", tag),
         }
     }
 }
