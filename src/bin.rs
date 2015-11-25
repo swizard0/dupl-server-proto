@@ -500,3 +500,164 @@ impl From<byteorder::Error> for Error {
         Error::ByteOrder(err)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::{ToBin, FromBin};
+    use super::super::{
+        Workload,
+        Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+        Rep, LookupResult, Match
+    };
+
+    fn encode_decode<T>(value: T) -> T where T: ToBin + FromBin {
+        let required = value.encode_len();
+        let mut packet: Vec<_> = (0 .. required).map(|_| 0).collect();
+        {
+            let area = value.encode(&mut packet);
+            assert_eq!(area.len(), 0);
+        }
+        let (decoded, area) = <T as FromBin>::decode(&packet).unwrap();
+        assert_eq!(area.len(), 0);
+        decoded
+    }
+
+    fn encode_decode_req(req: Req<String>) -> Req<String> { encode_decode(req) }
+    fn encode_decode_rep(rep: Rep<String>) -> Rep<String> { encode_decode(rep) }
+
+    #[test]
+    fn req_00() {
+        match encode_decode_req(Req::Init) {
+            Req::Init => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn req_01() {
+        match encode_decode_req(Req::Lookup(Workload::Single(LookupTask {
+            text: "hello world".to_owned(),
+            result: LookupType::All,
+            post_action: PostAction::None,
+        }))) {
+            Req::Lookup(Workload::Single(LookupTask {
+                text: ref lookup_text,
+                result: LookupType::All,
+                post_action: PostAction::None,
+            })) if lookup_text == "hello world" => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn req_02() {
+        match encode_decode_req(Req::Lookup(Workload::Single(LookupTask {
+            text: "hello world".to_owned(),
+            result: LookupType::BestOrMine,
+            post_action: PostAction::InsertNew {
+                cond: InsertCond::Always,
+                assign: ClusterAssign::ServerChoice,
+                user_data: "some data".to_owned(),
+            },
+        }))) {
+            Req::Lookup(Workload::Single(LookupTask {
+                text: ref lookup_text,
+                result: LookupType::BestOrMine,
+                post_action: PostAction::InsertNew {
+                    cond: InsertCond::Always,
+                    assign: ClusterAssign::ServerChoice,
+                    user_data: ref lookup_user_data,
+                },
+            })) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn req_03() {
+        match encode_decode_req(Req::Lookup(Workload::Single(LookupTask {
+            text: "hello world".to_owned(),
+            result: LookupType::Best,
+            post_action: PostAction::InsertNew {
+                cond: InsertCond::BestSimLessThan(0.5),
+                assign: ClusterAssign::ClientChoice(177),
+                user_data: "some data".to_owned(),
+            },
+        }))) {
+            Req::Lookup(Workload::Single(LookupTask {
+                text: ref lookup_text,
+                result: LookupType::Best,
+                post_action: PostAction::InsertNew {
+                    cond: InsertCond::BestSimLessThan(0.5),
+                    assign: ClusterAssign::ClientChoice(177),
+                    user_data: ref lookup_user_data,
+                },
+            })) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn req_04() {
+        match encode_decode_req(Req::Terminate) {
+            Req::Terminate => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_00() {
+        match encode_decode_rep(Rep::InitAck) {
+            Rep::InitAck => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_01() {
+        match encode_decode_rep(Rep::TerminateAck) {
+            Rep::TerminateAck => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_02() {
+        match encode_decode_rep(Rep::TooBusy) {
+            Rep::TooBusy => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_03() {
+        match encode_decode_rep(Rep::WantCrash) {
+            Rep::WantCrash => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_04() {
+        match encode_decode_rep(Rep::Result(Workload::Single(LookupResult::EmptySet))) {
+            Rep::Result(Workload::Single(LookupResult::EmptySet)) => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rep_05() {
+        match encode_decode_rep(Rep::Result(Workload::Single(LookupResult::Best(Match {
+            cluster_id: 177,
+            similarity: 0.5,
+            user_data: "some data".to_owned(),
+        })))) {
+            Rep::Result(Workload::Single(LookupResult::Best(Match {
+                cluster_id: 177,
+                similarity: 0.5,
+                user_data: ref match_user_data,
+            }))) if match_user_data == "some data" => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+}
