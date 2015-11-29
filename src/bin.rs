@@ -207,6 +207,7 @@ impl<T> ToBin for Workload<T> where T: ToBin + Debug {
             },
             &Workload::Many(ref values) => {
                 let area = put_adv!(area, u8, write_u8, 2);
+                let area = put_adv!(area, u32, write_u32, values.len() as u32);
                 values.iter().fold(area, |area, value| value.encode(area))
             },
         }
@@ -652,6 +653,39 @@ mod test {
     fn req_04() {
         match encode_decode_req(Req::Terminate) {
             Req::Terminate => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn req_05() {
+        match encode_decode_req(Req::Lookup(Workload::Many(vec![LookupTask {
+            text: "hello, world".to_owned(),
+            result: LookupType::All,
+            post_action: PostAction::None,
+        }, LookupTask {
+            text: "hello, cat".to_owned(),
+            result: LookupType::Best,
+            post_action: PostAction::None,
+        }, LookupTask {
+            text: "hello, dog".to_owned(),
+            result: LookupType::BestOrMine,
+            post_action: PostAction::None,
+        }]))) {
+            Req::Lookup(Workload::Many(ref workloads)) => {
+                match workloads.get(0) {
+                    Some(&LookupTask { text: ref t, result: LookupType::All, post_action: PostAction::None, }) if t == "hello, world" => (),
+                    other => panic!("bad workload 0: {:?}", other),
+                }
+                match workloads.get(1) {
+                    Some(&LookupTask { text: ref t, result: LookupType::Best, post_action: PostAction::None, }) if t == "hello, cat" => (),
+                    other => panic!("bad workload 1: {:?}", other),
+                }
+                match workloads.get(2) {
+                    Some(&LookupTask { text: ref t, result: LookupType::BestOrMine, post_action: PostAction::None, }) if t == "hello, dog" => (),
+                    other => panic!("bad workload 2: {:?}", other),
+                }
+            },
             other => panic!("bad result: {:?}", other),
         }
     }
