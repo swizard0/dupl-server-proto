@@ -1,5 +1,7 @@
 use std::{io, fmt, str};
+use std::sync::Arc;
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::mem::size_of;
 use std::slice::bytes;
 use std::convert::From;
@@ -27,6 +29,23 @@ pub trait ToBin {
 
 pub trait FromBin: Sized {
     fn decode<'a>(area: &'a [u8]) -> Result<(Self, &'a [u8]), Error>;
+}
+
+impl<T> ToBin for Arc<T> where T: ToBin {
+    fn encode_len(&self) -> usize {
+        self.deref().encode_len()
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        self.deref().encode(area)
+    }
+}
+
+impl<T> FromBin for Arc<T> where T: FromBin {
+    fn decode<'a>(area: &'a [u8]) -> Result<(Arc<T>, &'a [u8]), Error> {
+        let (obj, area) = try!(T::decode(area));
+        Ok((Arc::new(obj), area))
+    }
 }
 
 macro_rules! try_get {
