@@ -6,7 +6,7 @@ use super::{
     Rep, LookupResult, Match
 };
 
-pub fn req_to_json<UD>(req: &Req<UD>) -> Json where UD: Debug + ToJson { req.to_json() }
+pub fn req_to_json<UD>(trans: &Trans<UD>) -> Json where UD: Debug + ToJson { trans.to_json() }
 pub fn rep_to_json<UD>(rep: &Rep<UD>) -> Json where UD: Debug + ToJson { rep.to_json() }
 
 pub fn json_str_to_anything<T>(json_str: &str) -> Result<T, String> where T: Debug + FromJson {
