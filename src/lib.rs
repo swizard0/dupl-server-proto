@@ -8,6 +8,12 @@ pub mod bin;
 pub mod json;
 
 #[derive(Debug)]
+pub enum Trans<UD> where UD: Debug {
+    Async(Req<UD>),
+    Sync(Req<UD>),
+}
+
+#[derive(Debug)]
 pub enum Req<UD> where UD: Debug {
     Init,
     Lookup(Workload<LookupTask<UD>>),

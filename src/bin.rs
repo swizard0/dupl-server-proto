@@ -9,7 +9,7 @@ use byteorder;
 use byteorder::{ByteOrder, NativeEndian};
 use super::{
     Workload,
-    Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+    Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
     Rep, LookupResult, Match
 };
 
@@ -152,6 +152,28 @@ impl FromBin for String {
     }
 }
 
+impl<UD> ToBin for Trans<UD> where UD: ToBin + Debug {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &Trans::Async(ref req) => req.encode_len(),
+            &Trans::Sync(ref req) => req.encode_len(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &Trans::Async(ref req) => {
+                let area = put_adv!(area, u8, write_u8, 1);
+                req.encode(area)
+            },
+            &Trans::Sync(ref req) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                req.encode(area)
+            },
+        }
+    }
+}
+
 impl<UD> ToBin for Req<UD> where UD: ToBin + Debug {
     fn encode_len(&self) -> usize {
         size_of::<u8>() + match self {
@@ -170,6 +192,23 @@ impl<UD> ToBin for Req<UD> where UD: ToBin + Debug {
             },
             &Req::Terminate =>
                 put_adv!(area, u8, write_u8, 3),
+        }
+    }
+}
+
+impl<UD> FromBin for Trans<UD> where UD: FromBin + Debug {
+    fn decode<'a>(area: &'a [u8]) -> Result<(Trans<UD>, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) => {
+                let (req, area) = try!(Req::decode(area));
+                Ok((Trans::Async(req), area))
+            },
+            (2, area) => {
+                let (req, area) = try!(Req::decode(area));
+                Ok((Trans::Sync(req), area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
         }
     }
 }
@@ -558,7 +597,7 @@ mod test {
     use super::{ToBin, FromBin};
     use super::super::{
         Workload,
-        Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+        Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
         Rep, LookupResult, Match
     };
 
@@ -574,36 +613,44 @@ mod test {
         decoded
     }
 
-    fn encode_decode_req(req: Req<String>) -> Req<String> { encode_decode(req) }
+    fn encode_decode_req(req: Trans<String>) -> Trans<String> { encode_decode(req) }
     fn encode_decode_rep(rep: Rep<String>) -> Rep<String> { encode_decode(rep) }
 
     #[test]
-    fn req_00() {
-        match encode_decode_req(Req::Init) {
-            Req::Init => (),
+    fn req_00_async() {
+        match encode_decode_req(Trans::Async(Req::Init)) {
+            Trans::Async(Req::Init) => (),
+            other => panic!("bad result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn req_00_sync() {
+        match encode_decode_req(Trans::Sync(Req::Init)) {
+            Trans::Sync(Req::Init) => (),
             other => panic!("bad result: {:?}", other),
         }
     }
 
     #[test]
     fn req_01() {
-        match encode_decode_req(Req::Lookup(Workload::Single(LookupTask {
+        match encode_decode_req(Trans::Async(Req::Lookup(Workload::Single(LookupTask {
             text: "hello world".to_owned(),
             result: LookupType::All,
             post_action: PostAction::None,
-        }))) {
-            Req::Lookup(Workload::Single(LookupTask {
+        })))) {
+            Trans::Async(Req::Lookup(Workload::Single(LookupTask {
                 text: ref lookup_text,
                 result: LookupType::All,
                 post_action: PostAction::None,
-            })) if lookup_text == "hello world" => (),
+            }))) if lookup_text == "hello world" => (),
             other => panic!("bad result: {:?}", other),
         }
     }
 
     #[test]
     fn req_02() {
-        match encode_decode_req(Req::Lookup(Workload::Single(LookupTask {
+        match encode_decode_req(Trans::Sync(Req::Lookup(Workload::Single(LookupTask {
             text: "hello world".to_owned(),
             result: LookupType::BestOrMine,
             post_action: PostAction::InsertNew {
@@ -611,8 +658,8 @@ mod test {
                 assign: ClusterAssign::ServerChoice,
                 user_data: "some data".to_owned(),
             },
-        }))) {
-            Req::Lookup(Workload::Single(LookupTask {
+        })))) {
+            Trans::Sync(Req::Lookup(Workload::Single(LookupTask {
                 text: ref lookup_text,
                 result: LookupType::BestOrMine,
                 post_action: PostAction::InsertNew {
@@ -620,14 +667,14 @@ mod test {
                     assign: ClusterAssign::ServerChoice,
                     user_data: ref lookup_user_data,
                 },
-            })) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
+            }))) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
             other => panic!("bad result: {:?}", other),
         }
     }
 
     #[test]
     fn req_03() {
-        match encode_decode_req(Req::Lookup(Workload::Single(LookupTask {
+        match encode_decode_req(Trans::Async(Req::Lookup(Workload::Single(LookupTask {
             text: "hello world".to_owned(),
             result: LookupType::Best,
             post_action: PostAction::InsertNew {
@@ -635,8 +682,8 @@ mod test {
                 assign: ClusterAssign::ClientChoice(177),
                 user_data: "some data".to_owned(),
             },
-        }))) {
-            Req::Lookup(Workload::Single(LookupTask {
+        })))) {
+            Trans::Async(Req::Lookup(Workload::Single(LookupTask {
                 text: ref lookup_text,
                 result: LookupType::Best,
                 post_action: PostAction::InsertNew {
@@ -644,22 +691,22 @@ mod test {
                     assign: ClusterAssign::ClientChoice(177),
                     user_data: ref lookup_user_data,
                 },
-            })) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
+            }))) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
             other => panic!("bad result: {:?}", other),
         }
     }
 
     #[test]
     fn req_04() {
-        match encode_decode_req(Req::Terminate) {
-            Req::Terminate => (),
+        match encode_decode_req(Trans::Sync(Req::Terminate)) {
+            Trans::Sync(Req::Terminate) => (),
             other => panic!("bad result: {:?}", other),
         }
     }
 
     #[test]
     fn req_05() {
-        match encode_decode_req(Req::Lookup(Workload::Many(vec![LookupTask {
+        match encode_decode_req(Trans::Async(Req::Lookup(Workload::Many(vec![LookupTask {
             text: "hello, world".to_owned(),
             result: LookupType::All,
             post_action: PostAction::None,
@@ -671,8 +718,8 @@ mod test {
             text: "hello, dog".to_owned(),
             result: LookupType::BestOrMine,
             post_action: PostAction::None,
-        }]))) {
-            Req::Lookup(Workload::Many(ref workloads)) => {
+        }])))) {
+            Trans::Async(Req::Lookup(Workload::Many(ref workloads))) => {
                 match workloads.get(0) {
                     Some(&LookupTask { text: ref t, result: LookupType::All, post_action: PostAction::None, }) if t == "hello, world" => (),
                     other => panic!("bad workload 0: {:?}", other),
