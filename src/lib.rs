@@ -50,8 +50,8 @@ pub enum InsertCond {
 
 #[derive(Debug)]
 pub struct ClusterAssign {
-    cond: AssignCond,
-    choice: ClusterChoice,
+    pub cond: AssignCond,
+    pub choice: ClusterChoice,
 }
 
 #[derive(Debug)]
