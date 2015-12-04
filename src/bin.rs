@@ -9,7 +9,7 @@ use byteorder;
 use byteorder::{ByteOrder, NativeEndian};
 use super::{
     Workload,
-    Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+    Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, AssignCond, ClusterChoice, LookupType,
     Rep, LookupResult, Match
 };
 
@@ -406,17 +406,75 @@ impl FromBin for InsertCond {
 
 impl ToBin for ClusterAssign {
     fn encode_len(&self) -> usize {
+        self.cond.encode_len() + self.choice.encode_len()
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        let area = self.cond.encode(area);
+        let area = self.choice.encode(area);
+        area
+    }
+}
+
+impl FromBin for ClusterAssign {
+    fn decode<'a>(area: &'a [u8]) -> Result<(ClusterAssign, &'a [u8]), Error> {
+        let (cond, area) = try!(AssignCond::decode(area));
+        let (choice, area) = try!(ClusterChoice::decode(area));
+        Ok((ClusterAssign {
+            cond: cond,
+            choice: choice,
+        }, area))
+    }
+}
+
+impl ToBin for AssignCond {
+    fn encode_len(&self) -> usize {
         size_of::<u8>() + match self {
-            &ClusterAssign::ServerChoice => 0,
-            &ClusterAssign::ClientChoice(..) => size_of::<u64>(),
+            &AssignCond::Always => 0,
+            &AssignCond::BestSimLessThan(..) => size_of::<f64>(),
         }
     }
 
     fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
         match self {
-            &ClusterAssign::ServerChoice =>
+            &AssignCond::Always =>
                 put_adv!(area, u8, write_u8, 1),
-            &ClusterAssign::ClientChoice(cluster_id) => {
+            &AssignCond::BestSimLessThan(sim) => {
+                let area = put_adv!(area, u8, write_u8, 2);
+                put_adv!(area, f64, write_f64, sim)
+            },
+        }
+    }
+}
+
+impl FromBin for AssignCond {
+    fn decode<'a>(area: &'a [u8]) -> Result<(AssignCond, &'a [u8]), Error> {
+        match try_get!(area, u8, read_u8) {
+            (1, area) =>
+                Ok((AssignCond::Always, area)),
+            (2, area) => {
+                let (sim, area) = try_get!(area, f64, read_f64);
+                Ok((AssignCond::BestSimLessThan(sim), area))
+            },
+            (tag, _) =>
+                Err(Error::InvalidTag(tag)),
+        }
+    }
+}
+
+impl ToBin for ClusterChoice {
+    fn encode_len(&self) -> usize {
+        size_of::<u8>() + match self {
+            &ClusterChoice::ServerChoice => 0,
+            &ClusterChoice::ClientChoice(..) => size_of::<u64>(),
+        }
+    }
+
+    fn encode<'a>(&self, area: &'a mut [u8]) -> &'a mut [u8] {
+        match self {
+            &ClusterChoice::ServerChoice =>
+                put_adv!(area, u8, write_u8, 1),
+            &ClusterChoice::ClientChoice(cluster_id) => {
                 let area = put_adv!(area, u8, write_u8, 2);
                 put_adv!(area, u64, write_u64, cluster_id)
             },
@@ -424,14 +482,14 @@ impl ToBin for ClusterAssign {
     }
 }
 
-impl FromBin for ClusterAssign {
-    fn decode<'a>(area: &'a [u8]) -> Result<(ClusterAssign, &'a [u8]), Error> {
+impl FromBin for ClusterChoice {
+    fn decode<'a>(area: &'a [u8]) -> Result<(ClusterChoice, &'a [u8]), Error> {
         match try_get!(area, u8, read_u8) {
             (1, area) =>
-                Ok((ClusterAssign::ServerChoice, area)),
+                Ok((ClusterChoice::ServerChoice, area)),
             (2, area) => {
                 let (cluster_id, area) = try_get!(area, u64, read_u64);
-                Ok((ClusterAssign::ClientChoice(cluster_id), area))
+                Ok((ClusterChoice::ClientChoice(cluster_id), area))
             },
             (tag, _) =>
                 Err(Error::InvalidTag(tag)),
@@ -597,7 +655,7 @@ mod test {
     use super::{ToBin, FromBin};
     use super::super::{
         Workload,
-        Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+        Trans, Req, LookupTask, PostAction, InsertCond, AssignCond, ClusterChoice, ClusterAssign, LookupType,
         Rep, LookupResult, Match
     };
 
@@ -655,7 +713,10 @@ mod test {
             result: LookupType::BestOrMine,
             post_action: PostAction::InsertNew {
                 cond: InsertCond::Always,
-                assign: ClusterAssign::ServerChoice,
+                assign: ClusterAssign {
+                    cond: AssignCond::Always,
+                    choice: ClusterChoice::ServerChoice,
+                },
                 user_data: "some data".to_owned(),
             },
         })))) {
@@ -664,7 +725,10 @@ mod test {
                 result: LookupType::BestOrMine,
                 post_action: PostAction::InsertNew {
                     cond: InsertCond::Always,
-                    assign: ClusterAssign::ServerChoice,
+                    assign: ClusterAssign {
+                        cond: AssignCond::Always,
+                        choice: ClusterChoice::ServerChoice,
+                    },
                     user_data: ref lookup_user_data,
                 },
             }))) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
@@ -679,7 +743,10 @@ mod test {
             result: LookupType::Best,
             post_action: PostAction::InsertNew {
                 cond: InsertCond::BestSimLessThan(0.5),
-                assign: ClusterAssign::ClientChoice(177),
+                assign: ClusterAssign {
+                    cond: AssignCond::Always,
+                    choice: ClusterChoice::ClientChoice(177),
+                },
                 user_data: "some data".to_owned(),
             },
         })))) {
@@ -688,7 +755,10 @@ mod test {
                 result: LookupType::Best,
                 post_action: PostAction::InsertNew {
                     cond: InsertCond::BestSimLessThan(0.5),
-                    assign: ClusterAssign::ClientChoice(177),
+                    assign: ClusterAssign {
+                        cond: AssignCond::Always,
+                        choice: ClusterChoice::ClientChoice(177),
+                    },
                     user_data: ref lookup_user_data,
                 },
             }))) if lookup_text == "hello world" && lookup_user_data == "some data" => (),

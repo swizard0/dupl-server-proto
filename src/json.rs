@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use rustc_serialize::json::{Json, Object, ToJson};
 use super::{
     Workload,
-    Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+    Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, AssignCond, ClusterChoice, LookupType,
     Rep, LookupResult, Match
 };
 
@@ -42,17 +42,40 @@ impl ToJson for LookupType {
     }
 }
 
-impl ToJson for ClusterAssign {
+impl ToJson for AssignCond {
     fn to_json(&self) -> Json {
         match *self {
-            ClusterAssign::ServerChoice =>
+            AssignCond::Always =>
+                Json::String("always".to_string()),
+            AssignCond::BestSimLessThan(sim) => {
+                let mut o = Object::new();
+                o.insert("best_sim_less_than".to_string(), sim.to_json());
+                Json::Object(o)
+            },
+        }
+    }
+}
+
+impl ToJson for ClusterChoice {
+    fn to_json(&self) -> Json {
+        match *self {
+            ClusterChoice::ServerChoice =>
                 Json::String("server_choice".to_string()),
-            ClusterAssign::ClientChoice(cluster_id) => {
+            ClusterChoice::ClientChoice(cluster_id) => {
                 let mut o = Object::new();
                 o.insert("client_choice".to_string(), cluster_id.to_json());
                 Json::Object(o)
             },
         }
+    }
+}
+
+impl ToJson for ClusterAssign {
+    fn to_json(&self) -> Json {
+        let mut o = Object::new();
+        o.insert("cond".to_string(), self.cond.to_json());
+        o.insert("choice".to_string(), self.choice.to_json());
+        Json::Object(o)
     }
 }
 
@@ -222,13 +245,41 @@ impl FromJson for LookupType {
     }
 }
 
-impl FromJson for ClusterAssign {
-    fn from_json<'a>(json: &'a Json) -> Result<ClusterAssign, JsonDecodeError<'a>> {
+impl FromJson for InsertCond {
+    fn from_json<'a>(json: &'a Json) -> Result<InsertCond, JsonDecodeError<'a>> {
+        match json {
+            &Json::String(ref token) if *token == "always" =>
+                Ok(InsertCond::Always),
+            &Json::Object(ref obj) => match obj.get("best_sim_less_than") {
+                Some(&Json::F64(sim)) => Ok(InsertCond::BestSimLessThan(sim)),
+                _ => Err(JsonDecodeError::MalformedObject(json)),
+            },
+            _ => Err(JsonDecodeError::UnexpectedToken(json)),
+        }
+    }
+}
+
+impl FromJson for AssignCond {
+    fn from_json<'a>(json: &'a Json) -> Result<AssignCond, JsonDecodeError<'a>> {
+        match json {
+            &Json::String(ref token) if *token == "always" =>
+                Ok(AssignCond::Always),
+            &Json::Object(ref obj) => match obj.get("best_sim_less_than") {
+                Some(&Json::F64(sim)) => Ok(AssignCond::BestSimLessThan(sim)),
+                _ => Err(JsonDecodeError::MalformedObject(json)),
+            },
+            _ => Err(JsonDecodeError::UnexpectedToken(json)),
+        }
+    }
+}
+
+impl FromJson for ClusterChoice {
+    fn from_json<'a>(json: &'a Json) -> Result<ClusterChoice, JsonDecodeError<'a>> {
         let decoded = match json {
             &Json::String(ref token) if *token == "server_choice" =>
-                Some(ClusterAssign::ServerChoice),
+                Some(ClusterChoice::ServerChoice),
             &Json::Object(ref obj) => match obj.get("client_choice") {
-                Some(&Json::U64(cluster_id)) => Some(ClusterAssign::ClientChoice(cluster_id)),
+                Some(&Json::U64(cluster_id)) => Some(ClusterChoice::ClientChoice(cluster_id)),
                 _ => None,
             },
             _ => None,
@@ -238,13 +289,15 @@ impl FromJson for ClusterAssign {
     }
 }
 
-impl FromJson for InsertCond {
-    fn from_json<'a>(json: &'a Json) -> Result<InsertCond, JsonDecodeError<'a>> {
+impl FromJson for ClusterAssign {
+    fn from_json<'a>(json: &'a Json) -> Result<ClusterAssign, JsonDecodeError<'a>> {
         match json {
-            &Json::String(ref token) if *token == "always" =>
-                Ok(InsertCond::Always),
-            &Json::Object(ref obj) => match obj.get("best_sim_less_than") {
-                Some(&Json::F64(sim)) => Ok(InsertCond::BestSimLessThan(sim)),
+            &Json::Object(ref obj) => match (obj.get("cond"), obj.get("choice")) {
+                (Some(cond), Some(choice)) =>
+                    Ok(ClusterAssign {
+                        cond: try!(<AssignCond as FromJson>::from_json(cond)),
+                        choice: try!(<ClusterChoice as FromJson>::from_json(choice)),
+                    }),
                 _ => Err(JsonDecodeError::MalformedObject(json)),
             },
             _ => Err(JsonDecodeError::UnexpectedToken(json)),
@@ -405,7 +458,7 @@ mod test {
     use super::{FromJson};
     use super::super::{
         Workload,
-        Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, LookupType,
+        Trans, Req, LookupTask, PostAction, InsertCond, ClusterAssign, AssignCond, ClusterChoice, LookupType,
         Rep, LookupResult, Match
     };
 
@@ -456,7 +509,10 @@ mod test {
             result: LookupType::BestOrMine,
             post_action: PostAction::InsertNew {
                 cond: InsertCond::Always,
-                assign: ClusterAssign::ServerChoice,
+                assign: ClusterAssign {
+                    cond: AssignCond::Always,
+                    choice: ClusterChoice::ServerChoice,
+                },
                 user_data: "some data".to_owned(),
             },
         })))) {
@@ -465,7 +521,10 @@ mod test {
                 result: LookupType::BestOrMine,
                 post_action: PostAction::InsertNew {
                     cond: InsertCond::Always,
-                    assign: ClusterAssign::ServerChoice,
+                    assign: ClusterAssign {
+                        cond: AssignCond::Always,
+                        choice: ClusterChoice::ServerChoice,
+                    },
                     user_data: ref lookup_user_data,
                 },
             }))) if lookup_text == "hello world" && lookup_user_data == "some data" => (),
@@ -480,7 +539,10 @@ mod test {
             result: LookupType::Best,
             post_action: PostAction::InsertNew {
                 cond: InsertCond::BestSimLessThan(0.5),
-                assign: ClusterAssign::ClientChoice(177),
+                assign: ClusterAssign {
+                    cond: AssignCond::Always,
+                    choice: ClusterChoice::ClientChoice(177),
+                },
                 user_data: "some data".to_owned(),
             },
         })))) {
@@ -489,7 +551,10 @@ mod test {
                 result: LookupType::Best,
                 post_action: PostAction::InsertNew {
                     cond: InsertCond::BestSimLessThan(0.5),
-                    assign: ClusterAssign::ClientChoice(177),
+                    assign: ClusterAssign {
+                        cond: AssignCond::Always,
+                        choice: ClusterChoice::ClientChoice(177),
+                    },
                     user_data: ref lookup_user_data,
                 },
             }))) if lookup_text == "hello world" && lookup_user_data == "some data" => (),

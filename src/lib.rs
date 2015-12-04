@@ -49,7 +49,19 @@ pub enum InsertCond {
 }
 
 #[derive(Debug)]
-pub enum ClusterAssign {
+pub struct ClusterAssign {
+    cond: AssignCond,
+    choice: ClusterChoice,
+}
+
+#[derive(Debug)]
+pub enum AssignCond {
+    Always,
+    BestSimLessThan(f64),
+}
+
+#[derive(Debug)]
+pub enum ClusterChoice {
     ServerChoice,
     ClientChoice(u64),
 }
@@ -78,5 +90,3 @@ pub struct Match<UD> where UD: Debug {
     pub similarity: f64,
     pub user_data: UD,
 }
-
-
