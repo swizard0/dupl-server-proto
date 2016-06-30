@@ -1,8 +1,8 @@
 [package]
 name = "dupl_server_proto"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Alexey Voznyuk <me@swizard.info>"]
 
 [dependencies]
-rustc-serialize = "*"
-byteorder = "*"
+rustc-serialize = "0.3"
+byteorder = "0.5"
