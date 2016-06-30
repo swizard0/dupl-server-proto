@@ -1,4 +1,3 @@
-#![feature(slice_bytes)]
 extern crate byteorder;
 extern crate rustc_serialize;
 

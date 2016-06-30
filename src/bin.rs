@@ -3,9 +3,6 @@ use std::sync::Arc;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::mem::size_of;
-use std::slice::bytes;
-use std::convert::From;
-use byteorder;
 use byteorder::{ByteOrder, NativeEndian};
 use super::{
     Workload,
@@ -16,7 +13,6 @@ use super::{
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    ByteOrder(byteorder::Error),
     Utf8(str::Utf8Error),
     UnexpectedEOF,
     InvalidTag(u8),
@@ -98,7 +94,7 @@ macro_rules! put_str_adv {
         let dst = $area;
         let src_len_value = src.len() as u32;
         let area = put_adv!(dst, u32, write_u32, src_len_value);
-        bytes::copy_memory(src, area);
+        area[.. src.len()].copy_from_slice(src);
         &mut area[src.len() ..]
     })
 }
@@ -636,17 +632,10 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Error::Io(ref err) => write!(f, "I/O error {}", err),
-            &Error::ByteOrder(ref err) => write!(f, "byteorder related error: {}", err),
             &Error::Utf8(ref err) => write!(f, "utf8 related error: {}", err),
             &Error::UnexpectedEOF => f.write_str("unexpected EOF"),
             &Error::InvalidTag(tag) => write!(f, "invalid proto tag {}", tag),
         }
-    }
-}
-
-impl From<byteorder::Error> for Error {
-    fn from(err: byteorder::Error) -> Error {
-        Error::ByteOrder(err)
     }
 }
 
